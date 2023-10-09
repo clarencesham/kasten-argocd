@@ -1,5 +1,6 @@
-# ArgoCD and Kasten K10
+# ArgoCD and Kasten K10 (origin: https://github.com/MichaelCade/argocd-kasten)
 # Incorporating data management into your Continuous Deployment workflows and GitOps model
+# I have modified some files in this repository and this README file
 
 This is a very simple example of how we can integrate Kasten K10 with ArgoCD. It's voluntary kept very simple because we focus on using kasten with a [pre-sync phase](https://argoproj.github.io/argo-cd/user-guide/sync-waves/) in ArgoCD.
 
@@ -8,7 +9,7 @@ This is a very simple example of how we can integrate Kasten K10 with ArgoCD. It
 Deploy minikube cluster
 
 ```
-minikube start --addons volumesnapshots,csi-hostpath-driver --apiserver-port=6443 --container-runtime=containerd -p nicconf-demo --kubernetes-version=1.21.2
+minikube start --addons volumesnapshots,csi-hostpath-driver --kubernetes-version 1.26
 ```
 
 Deploy Kasten K10
@@ -23,15 +24,21 @@ kubectl patch storageclass csi-hostpath-sc -p '{"metadata": {"annotations":{"sto
 
 kubectl patch storageclass standard -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
 
-TOKEN_NAME=$(kubectl get secret --namespace kasten-io|grep k10-k10-token | cut -d " " -f 1)
-TOKEN=$(kubectl get secret --namespace kasten-io $TOKEN_NAME -o jsonpath="{.data.token}" | base64 --decode)
-
-echo "Token value: "
-echo $TOKEN
+kubectl -n kasten-io create token k10-k10 --duration=24h
 
 kubectl --namespace kasten-io port-forward service/gateway 8080:8000
 
 ```
+
+## Install MinIO
+
+```
+kubectl create namespace minio
+kubectl apply -f minio.yaml -n minio
+kubectl -n minio port-forward service/minio 9000:9000
+```
+
+Set up MinIO as S3-compatible storage for Kasten K10.
 
 ## Install ArgoCD
 
@@ -53,15 +60,15 @@ First let us confirm that we do not have a namespace called mysql as this will b
 
 We create a mysql app for sterilisation of animals in a pet clinic. 
 
-This app is deployed with Argo CD and is made of : 
+This app is deployed with ArgoCD and is made of : 
 *  A mysql deployment 
 *  A PVC 
 *  A secret 
 *  A service to mysql 
 
-This is the URL required for ArgoCD - https://github.com/MichaelCade/argocd-kasten.git
+The URL required for ArgoCD should be: https://github.com/clarencesham/kasten-argocd.git, and "path" should be "base" directory.
 
-We also use a pre-sync job (with corresponding sa and rolebinding)to backup the whole application with kasten before application sync. 
+We also use a pre-sync job (with corresponding sa and rolebinding) to backup the whole application with kasten before application sync. 
 
 At the first sync an empty restore point should be created.
 
@@ -102,12 +109,12 @@ kind: ConfigMap
 metadata:
   name: forbidden-species
 EOF 
-git add forbidden-species-cm.yaml
+git add .
 git commit -m "Adding forbidden species" 
 git push
 ```
 
-When deploying the app with Argo Cd we can see that a second restore point has been created
+When deploying the app with ArgoCD we can see that a second restore point has been created
 
 ## Phase 4 - The failure scenario
 
@@ -154,7 +161,7 @@ spec:
         name: data-job
       restartPolicy: Never
 EOF 
-git add migration-data-job.yaml
+git add .
 git commit -m "migrate the data to remove the forbidden species from the database, oh no I made a mistake, that will remove all the species !!" 
 git push
 ```
@@ -211,7 +218,7 @@ spec:
         - -c
         - |
           #!/bin/bash
-          # Oh no !! I forgot to the "where species in ${SPECIES}" clause in the delete command :(
+          # This time, I remember to put the "where species in ${SPECIES}" clause in the delete command :)
           mysql -h mysql -p\${MYSQL_ROOT_PASSWORD} -uroot -Bse "delete from test.pets where species in \${SPECIES}" 
         env:
         - name: MYSQL_ROOT_PASSWORD
@@ -228,8 +235,8 @@ spec:
         name: data-job
       restartPolicy: Never
 EOF 
-git add migration-data-job.yaml
-git commit -m "migrate the data to remove the forbidden species from the database, oh no I made a mistake, that will remove all the species !!" 
+git add .
+git commit -m "migrate the data to remove the forbidden species from the database, this time I only remove the forbidden species !!" 
 git push
 ```
 
